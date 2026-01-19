@@ -1,0 +1,47 @@
+# Build and Distribution
+/build/
+/Log Analyzer/
+/dist/
+*.zip
+
+# PyInstaller artifacts
+*.pyz
+*.exe
+*.toc
+warn-*.txt
+xref-*.html
+
+# Temporary files
+tmpclaude-*-cwd
+*.tmp
+*.temp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.Python
+venv/
+env/
+.venv/
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# User configuration (generated on first run)
+config.json
+
+# Sample log files
+/Log files/
+*.log
