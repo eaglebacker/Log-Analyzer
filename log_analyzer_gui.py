@@ -379,13 +379,15 @@ class LogAnalyzerApp:
         active_scroll.grid(row=0, column=1, sticky="ns")
         self.active_listbox.configure(yscrollcommand=active_scroll.set)
 
-        # Active filter buttons
+        # Active filter buttons (two rows for better fit)
         active_btn_frame = ttk.Frame(active_frame)
         active_btn_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        active_btn_frame.columnconfigure(0, weight=1)
+        active_btn_frame.columnconfigure(1, weight=1)
 
-        ttk.Button(active_btn_frame, text="Add All", command=self.add_all_to_active, width=8).grid(row=0, column=0, padx=(0, 5))
-        ttk.Button(active_btn_frame, text="Remove", command=self.remove_from_active, width=8).grid(row=0, column=1, padx=(0, 5))
-        ttk.Button(active_btn_frame, text="Clear All", command=self.clear_active_filters, width=8).grid(row=0, column=2)
+        ttk.Button(active_btn_frame, text="Add All", command=self.add_all_to_active).grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        ttk.Button(active_btn_frame, text="Remove", command=self.remove_from_active).grid(row=0, column=1, sticky="ew")
+        ttk.Button(active_btn_frame, text="Clear All", command=self.clear_active_filters).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(3, 0))
 
         # --- Right side: Keywords for selected filter ---
         keywords_frame = ttk.Frame(filters_frame)
