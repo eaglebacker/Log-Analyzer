@@ -68,6 +68,7 @@ class LogAnalyzerApp:
         # Filters: dict of {filter_name: [keywords]}
         self.filters = {}
         self.selected_filter = None
+        self.active_filters = []  # List of filter names to use in analysis
 
         # Default filters
         self.default_filters = {
@@ -202,6 +203,10 @@ class LogAnalyzerApp:
             if 'concat_mode' in config:
                 self.concat_mode_var.set(config['concat_mode'])
 
+            # Load active_filters (with validation against existing filters)
+            if 'active_filters' in config and isinstance(config['active_filters'], list):
+                self.active_filters = [name for name in config['active_filters'] if name in self.filters]
+
             # Load window geometry (with validation)
             if 'window' in config and 'geometry' in config['window']:
                 geometry = config['window']['geometry']
@@ -233,6 +238,7 @@ class LogAnalyzerApp:
                 'version': '1.0',
                 'concat_mode': self.concat_mode_var.get(),
                 'filters': dict(self.filters),  # Create a copy
+                'active_filters': list(self.active_filters),
                 'paths': {
                     'last_input_file': self.input_file.get(),
                     'last_output_file': self.output_file.get()
@@ -316,8 +322,9 @@ class LogAnalyzerApp:
         # === Filter Tabs Section ===
         filters_frame = ttk.LabelFrame(main_frame, text="3. Filter Tabs (each creates a separate Excel sheet)", padding="10")
         filters_frame.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
-        filters_frame.columnconfigure(0, weight=1)
-        filters_frame.columnconfigure(1, weight=2)
+        filters_frame.columnconfigure(0, weight=1)  # Filter Tabs
+        filters_frame.columnconfigure(1, weight=1)  # Active Filters (NEW)
+        filters_frame.columnconfigure(2, weight=2)  # Keywords
         filters_frame.rowconfigure(1, weight=1)
         main_frame.rowconfigure(2, weight=1)
 
@@ -336,6 +343,7 @@ class LogAnalyzerApp:
         self.filter_listbox = tk.Listbox(filter_listbox_frame, height=10, width=25, exportselection=False)
         self.filter_listbox.grid(row=0, column=0, sticky="nsew")
         self.filter_listbox.bind("<<ListboxSelect>>", self.on_filter_select)
+        self.filter_listbox.bind("<Double-1>", self.on_filter_double_click)
 
         filter_scroll = ttk.Scrollbar(filter_listbox_frame, orient="vertical", command=self.filter_listbox.yview)
         filter_scroll.grid(row=0, column=1, sticky="ns")
@@ -348,9 +356,37 @@ class LogAnalyzerApp:
         ttk.Button(filter_btn_frame, text="+ Add Tab", command=self.add_filter, width=12).grid(row=0, column=0, padx=(0, 5))
         ttk.Button(filter_btn_frame, text="- Remove", command=self.remove_filter, width=12).grid(row=0, column=1)
 
+        # --- Middle: Active Filters (NEW) ---
+        active_frame = ttk.Frame(filters_frame)
+        active_frame.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(0, 10))
+        active_frame.rowconfigure(1, weight=1)
+
+        ttk.Label(active_frame, text="Active Filters:", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
+
+        # Active listbox
+        active_listbox_frame = ttk.Frame(active_frame)
+        active_listbox_frame.grid(row=1, column=0, sticky="nsew", pady=(5, 5))
+        active_listbox_frame.rowconfigure(0, weight=1)
+
+        self.active_listbox = tk.Listbox(active_listbox_frame, height=10, width=20, exportselection=False)
+        self.active_listbox.grid(row=0, column=0, sticky="nsew")
+        self.active_listbox.bind("<Double-1>", self.on_active_double_click)
+
+        active_scroll = ttk.Scrollbar(active_listbox_frame, orient="vertical", command=self.active_listbox.yview)
+        active_scroll.grid(row=0, column=1, sticky="ns")
+        self.active_listbox.configure(yscrollcommand=active_scroll.set)
+
+        # Active filter buttons
+        active_btn_frame = ttk.Frame(active_frame)
+        active_btn_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+
+        ttk.Button(active_btn_frame, text="Add All", command=self.add_all_to_active, width=8).grid(row=0, column=0, padx=(0, 5))
+        ttk.Button(active_btn_frame, text="Remove", command=self.remove_from_active, width=8).grid(row=0, column=1, padx=(0, 5))
+        ttk.Button(active_btn_frame, text="Clear All", command=self.clear_active_filters, width=8).grid(row=0, column=2)
+
         # --- Right side: Keywords for selected filter ---
         keywords_frame = ttk.Frame(filters_frame)
-        keywords_frame.grid(row=0, column=1, rowspan=2, sticky="nsew")
+        keywords_frame.grid(row=0, column=2, rowspan=2, sticky="nsew")
         keywords_frame.columnconfigure(0, weight=1)
         keywords_frame.rowconfigure(2, weight=1)
 
@@ -541,6 +577,8 @@ class LogAnalyzerApp:
             filter_name = dialog.result
             self.filters[filter_name] = []
             self.filter_listbox.insert(tk.END, filter_name)
+            # Auto-activate newly created filters
+            self.add_to_active_filters(filter_name)
             # Select the new filter
             self.filter_listbox.selection_clear(0, tk.END)
             self.filter_listbox.selection_set(tk.END)
@@ -557,6 +595,10 @@ class LogAnalyzerApp:
         filter_name = self.filter_listbox.get(selection[0])
         if messagebox.askyesno("Confirm", f"Remove filter tab '{filter_name}'?"):
             del self.filters[filter_name]
+            # Also remove from active_filters if present
+            if filter_name in self.active_filters:
+                self.active_filters.remove(filter_name)
+                self.populate_active_list()
             self.filter_listbox.delete(selection[0])
             self.keywords_listbox.delete(0, tk.END)
             self.selected_filter = None
@@ -616,12 +658,72 @@ class LogAnalyzerApp:
             self.keywords_listbox.delete(idx)
         self.save_config()
 
+    # --- Active Filters Management ---
+    def add_to_active_filters(self, filter_name):
+        """Add a filter to the active filters list if not already present."""
+        if filter_name not in self.active_filters and filter_name in self.filters:
+            self.active_filters.append(filter_name)
+            self.populate_active_list()
+            self.save_config()
+
+    def remove_from_active_filters(self, filter_name):
+        """Remove a filter from the active filters list."""
+        if filter_name in self.active_filters:
+            self.active_filters.remove(filter_name)
+            self.populate_active_list()
+            self.save_config()
+
+    def on_filter_double_click(self, event):
+        """Handle double-click on Filter Tabs - add to active filters."""
+        selection = self.filter_listbox.curselection()
+        if selection:
+            filter_name = self.filter_listbox.get(selection[0])
+            self.add_to_active_filters(filter_name)
+
+    def on_active_double_click(self, event):
+        """Handle double-click on Active Filters - remove from active."""
+        selection = self.active_listbox.curselection()
+        if selection:
+            filter_name = self.active_listbox.get(selection[0])
+            self.remove_from_active_filters(filter_name)
+
+    def add_all_to_active(self):
+        """Add all filters to the active filters list."""
+        self.active_filters = list(self.filters.keys())
+        self.populate_active_list()
+        self.save_config()
+
+    def remove_from_active(self):
+        """Remove the selected filter from the active filters list."""
+        selection = self.active_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select a filter to remove from active.")
+            return
+        filter_name = self.active_listbox.get(selection[0])
+        self.remove_from_active_filters(filter_name)
+
+    def clear_active_filters(self):
+        """Remove all filters from the active filters list."""
+        self.active_filters = []
+        self.populate_active_list()
+        self.save_config()
+
+    def populate_active_list(self):
+        """Refresh the active filters listbox from state."""
+        self.active_listbox.delete(0, tk.END)
+        for filter_name in self.active_filters:
+            self.active_listbox.insert(tk.END, filter_name)
+
     def load_default_filters(self):
         """Reset to default filters."""
         self.filters = {name: list(keywords) for name, keywords in self.default_filters.items()}
         self.filter_listbox.delete(0, tk.END)
         for filter_name in self.filters:
             self.filter_listbox.insert(tk.END, filter_name)
+
+        # Activate all default filters
+        self.active_filters = list(self.filters.keys())
+        self.populate_active_list()
 
         # Select first filter
         if self.filters:
@@ -637,6 +739,9 @@ class LogAnalyzerApp:
         self.filter_listbox.delete(0, tk.END)
         for filter_name in self.filters:
             self.filter_listbox.insert(tk.END, filter_name)
+
+        # Also populate the active filters list
+        self.populate_active_list()
 
         # Select first filter if any exist
         if self.filters:
@@ -694,10 +799,31 @@ class LogAnalyzerApp:
             messagebox.showerror("Error", "Please specify an output file location.")
             return
 
-        # Check that at least one filter has keywords
-        filters_with_keywords = {name: kws for name, kws in self.filters.items() if kws}
+        # Check that at least one active filter exists
+        if not self.active_filters:
+            messagebox.showerror("No Active Filters",
+                "Please add at least one filter to the Active Filters list.\n\n"
+                "Double-click a filter in 'Filter Tabs' to activate it,\n"
+                "or click 'Add All' to activate all filters.")
+            return
+
+        # Check that active filters have keywords
+        filters_with_keywords = {
+            name: self.filters[name]
+            for name in self.active_filters
+            if name in self.filters and self.filters[name]
+        }
         if not filters_with_keywords:
-            messagebox.showerror("Error", "Please add at least one filter with keywords.")
+            # Find which active filters are missing keywords
+            empty_filters = [name for name in self.active_filters
+                           if name in self.filters and not self.filters[name]]
+            if empty_filters:
+                messagebox.showerror("Empty Filters",
+                    f"The following active filter(s) have no keywords:\n"
+                    f"{', '.join(empty_filters)}\n\n"
+                    f"Please add keywords or remove them from Active Filters.")
+            else:
+                messagebox.showerror("Error", "Please add at least one filter with keywords.")
             return
 
         self.update_progress(0)
