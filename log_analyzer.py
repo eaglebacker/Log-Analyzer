@@ -11,6 +11,7 @@ Example:
 
 import sys
 import os
+import re
 from pathlib import Path
 
 try:
@@ -38,6 +39,18 @@ ERROR_KEYWORDS = [
     # "Warning",
     # "Timeout",
 ]
+
+
+def sanitize_for_excel(text: str) -> str:
+    """
+    Remove characters that are illegal in XML (and thus xlsx files).
+    XML 1.0 only allows: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
+    """
+    # Remove control characters except tab (0x9), newline (0xA), carriage return (0xD)
+    illegal_xml_chars = re.compile(
+        r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]'
+    )
+    return illegal_xml_chars.sub('', text)
 
 
 def read_log_file(file_path: str) -> list[str]:
@@ -100,7 +113,7 @@ def create_excel_report(
     # Add all log lines
     for idx, line in enumerate(all_lines, start=2):
         ws_all[f'A{idx}'] = idx - 1  # Line number
-        ws_all[f'B{idx}'] = line
+        ws_all[f'B{idx}'] = sanitize_for_excel(line)
 
     # Adjust column widths
     ws_all.column_dimensions['A'].width = 10
@@ -123,7 +136,7 @@ def create_excel_report(
     # Add error lines
     for idx, (line_num, line) in enumerate(error_lines, start=2):
         ws_errors[f'A{idx}'] = line_num
-        ws_errors[f'B{idx}'] = line
+        ws_errors[f'B{idx}'] = sanitize_for_excel(line)
 
     # Adjust column widths
     ws_errors.column_dimensions['A'].width = 15

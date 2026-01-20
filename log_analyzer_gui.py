@@ -38,6 +38,17 @@ except ImportError:
 # Excel row limit (max rows per worksheet)
 EXCEL_MAX_ROWS = 1048576
 
+# Regex pattern for illegal XML characters
+ILLEGAL_XML_CHARS = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]')
+
+
+def sanitize_for_excel(text: str) -> str:
+    """
+    Remove characters that are illegal in XML (and thus xlsx files).
+    XML 1.0 only allows: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
+    """
+    return ILLEGAL_XML_CHARS.sub('', text)
+
 
 class LogAnalyzerApp:
     def __init__(self, root):
@@ -391,7 +402,7 @@ class LogAnalyzerApp:
         self.status_label = ttk.Label(status_frame, text="Ready. Select a log file to begin.", foreground="gray")
         self.status_label.grid(row=0, column=0, sticky="w")
 
-        self.progress = ttk.Progressbar(status_frame, mode="indeterminate")
+        self.progress = ttk.Progressbar(status_frame, mode="determinate", maximum=100)
         self.progress.grid(row=1, column=0, sticky="ew", pady=(10, 0))
 
     def browse_input(self):
@@ -645,6 +656,11 @@ class LogAnalyzerApp:
         self.status_label.configure(text=message, foreground=color)
         self.root.update_idletasks()
 
+    def update_progress(self, value):
+        """Update progress bar (0-100)."""
+        self.progress['value'] = value
+        self.root.update_idletasks()
+
     def analyze(self):
         if self.concat_mode_var.get():
             # Multi-file mode validation
@@ -684,7 +700,7 @@ class LogAnalyzerApp:
             messagebox.showerror("Error", "Please add at least one filter with keywords.")
             return
 
-        self.progress.start()
+        self.update_progress(0)
         thread = threading.Thread(
             target=self.run_analysis,
             args=(input_path, output_path, filters_with_keywords.copy())
@@ -696,19 +712,22 @@ class LogAnalyzerApp:
             if self.concat_mode_var.get():
                 # Multi-file concatenation mode
                 self.update_status(f"Reading {len(self.selected_files)} log files...", "blue")
+                self.update_progress(0)
 
-                # Read and tag all files
+                # Read and tag all files (0-10%)
                 tagged_lines = self.read_and_tag_log_files(self.selected_files)
+                self.update_progress(10)
 
                 if not tagged_lines:
-                    self.progress.stop()
+                    self.update_progress(100)
                     messagebox.showerror("Error", "No valid lines found in selected files.")
                     return
 
-                # Sort chronologically
+                # Sort chronologically (10-15%)
                 self.update_status("Sorting lines chronologically...", "blue")
                 sorted_lines = self.sort_and_merge_lines(tagged_lines)
                 total_lines = len(sorted_lines)
+                self.update_progress(15)
 
                 # Warn if no timestamps
                 if all(t[0] is None for t in sorted_lines):
@@ -716,15 +735,21 @@ class LogAnalyzerApp:
                         "Could not parse any timestamps from the selected files. "
                         "Lines will be displayed in file order without chronological sorting.")
 
-                # Apply filters to sorted lines
+                # Apply filters to sorted lines (15-50%)
                 self.update_status(f"Read {total_lines:,} lines. Applying filters...", "blue")
                 filter_results = {}
-                for filter_name, keywords in filters.items():
-                    matches = self.filter_tagged_lines(sorted_lines, keywords)
+                num_filters = len(filters)
+                for filter_idx, (filter_name, keywords) in enumerate(filters.items()):
+                    # Calculate progress range for this filter
+                    filter_start = 15 + (filter_idx / num_filters) * 35
+                    filter_end = 15 + ((filter_idx + 1) / num_filters) * 35
+                    matches = self.filter_tagged_lines(sorted_lines, keywords, self.update_progress, filter_start, filter_end)
                     filter_results[filter_name] = {
                         "keywords": keywords,
                         "matches": matches
                     }
+
+                self.update_progress(50)
 
                 # Check if row limit exceeded
                 max_data_rows = EXCEL_MAX_ROWS - 1  # Account for header row
@@ -733,7 +758,7 @@ class LogAnalyzerApp:
 
                 if total_lines > max_data_rows:
                     # Show dialog on main thread
-                    self.progress.stop()
+                    self.update_progress(100)
                     dialog = RowLimitDialog(self.root, total_lines)
                     export_mode = dialog.result
 
@@ -742,20 +767,20 @@ class LogAnalyzerApp:
                         self.update_status("Export cancelled by user.", "gray")
                         return
 
-                    self.progress.start()
+                    self.update_progress(50)
 
-                # Create output based on user choice
+                # Create output based on user choice (50-100%)
                 if export_mode == "csv":
                     self.update_status(f"Creating CSV files...", "blue")
                     created_files = self.create_csv_report_concat(sorted_lines, filter_results, output_path, self.selected_files)
                 elif export_mode == "split":
                     self.update_status(f"Creating Excel file with split sheets...", "blue")
-                    self.create_excel_report_concat_split(sorted_lines, filter_results, output_path, self.selected_files)
+                    self.create_excel_report_concat_split(sorted_lines, filter_results, output_path, self.selected_files, self.update_progress)
                 else:
                     self.update_status(f"Creating Excel file with {len(filters)} filter tab(s)...", "blue")
-                    self.create_excel_report_concat(sorted_lines, filter_results, output_path, self.selected_files)
+                    self.create_excel_report_concat(sorted_lines, filter_results, output_path, self.selected_files, self.update_progress)
 
-                self.progress.stop()
+                self.update_progress(100)
 
                 # Build summary message
                 summary_parts = []
@@ -777,19 +802,27 @@ class LogAnalyzerApp:
             else:
                 # Single-file mode (existing logic)
                 self.update_status("Reading log file...", "blue")
+                self.update_progress(0)
                 all_lines = self.read_log_file(input_path)
                 total_lines = len(all_lines)
+                self.update_progress(10)
 
                 self.update_status(f"Read {total_lines:,} lines. Applying filters...", "blue")
 
-                # Apply each filter
+                # Apply each filter (10-50%)
                 filter_results = {}
-                for filter_name, keywords in filters.items():
-                    matches = self.filter_lines(all_lines, keywords)
+                num_filters = len(filters)
+                for filter_idx, (filter_name, keywords) in enumerate(filters.items()):
+                    # Calculate progress range for this filter
+                    filter_start = 10 + (filter_idx / num_filters) * 40
+                    filter_end = 10 + ((filter_idx + 1) / num_filters) * 40
+                    matches = self.filter_lines(all_lines, keywords, self.update_progress, filter_start, filter_end)
                     filter_results[filter_name] = {
                         "keywords": keywords,
                         "matches": matches
                     }
+
+                self.update_progress(50)
 
                 # Check if row limit exceeded
                 max_data_rows = EXCEL_MAX_ROWS - 1  # Account for header row
@@ -798,7 +831,7 @@ class LogAnalyzerApp:
 
                 if total_lines > max_data_rows:
                     # Show dialog on main thread
-                    self.progress.stop()
+                    self.update_progress(100)
                     dialog = RowLimitDialog(self.root, total_lines)
                     export_mode = dialog.result
 
@@ -807,20 +840,20 @@ class LogAnalyzerApp:
                         self.update_status("Export cancelled by user.", "gray")
                         return
 
-                    self.progress.start()
+                    self.update_progress(50)
 
-                # Create output based on user choice
+                # Create output based on user choice (50-100%)
                 if export_mode == "csv":
                     self.update_status(f"Creating CSV files...", "blue")
                     created_files = self.create_csv_report(all_lines, filter_results, output_path, input_path)
                 elif export_mode == "split":
                     self.update_status(f"Creating Excel file with split sheets...", "blue")
-                    self.create_excel_report_split(all_lines, filter_results, output_path, input_path)
+                    self.create_excel_report_split(all_lines, filter_results, output_path, input_path, self.update_progress)
                 else:
                     self.update_status(f"Creating Excel file with {len(filters)} filter tab(s)...", "blue")
-                    self.create_excel_report(all_lines, filter_results, output_path, input_path)
+                    self.create_excel_report(all_lines, filter_results, output_path, input_path, self.update_progress)
 
-                self.progress.stop()
+                self.update_progress(100)
 
                 # Build summary message
                 summary_parts = []
@@ -841,7 +874,7 @@ class LogAnalyzerApp:
                         os.startfile(output_path)
 
         except Exception as e:
-            self.progress.stop()
+            self.update_progress(100)
             self.update_status(f"Error: {str(e)}", "red")
             messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
 
@@ -909,29 +942,40 @@ class LogAnalyzerApp:
         # Concatenate: sorted lines first, then lines without timestamps
         return with_timestamp + without_timestamp
 
-    def filter_lines(self, lines, keywords):
+    def filter_lines(self, lines, keywords, progress_callback=None, progress_start=10, progress_end=50):
         """Filter lines that contain any of the keywords."""
         matches = []
         keywords_lower = [kw.lower() for kw in keywords]
-        for line_num, line in enumerate(lines, start=1):
+        total = len(lines)
+        batch_size = max(1000, total // 100)
+        for i, line in enumerate(lines):
+            line_num = i + 1
             line_lower = line.lower()
             if any(keyword in line_lower for keyword in keywords_lower):
                 matches.append((line_num, line))
+            if progress_callback and i % batch_size == 0:
+                pct = progress_start + (i / total) * (progress_end - progress_start)
+                progress_callback(pct)
         return matches
 
-    def filter_tagged_lines(self, tagged_lines, keywords):
+    def filter_tagged_lines(self, tagged_lines, keywords, progress_callback=None, progress_start=15, progress_end=50):
         """
         Filter tagged lines that contain any of the keywords.
         Returns list of tagged tuples that match.
         """
         matches = []
         keywords_lower = [kw.lower() for kw in keywords]
+        total = len(tagged_lines)
+        batch_size = max(1000, total // 100)
 
-        for tagged_line in tagged_lines:
+        for i, tagged_line in enumerate(tagged_lines):
             timestamp, filename, line, line_num = tagged_line
             line_lower = line.lower()
             if any(keyword in line_lower for keyword in keywords_lower):
                 matches.append(tagged_line)
+            if progress_callback and i % batch_size == 0:
+                pct = progress_start + (i / total) * (progress_end - progress_start)
+                progress_callback(pct)
 
         return matches
 
@@ -951,7 +995,7 @@ class LogAnalyzerApp:
             date_color_map[date_obj] = color
         return date_color_map
 
-    def create_excel_report(self, all_lines, filter_results, output_path, source_file):
+    def create_excel_report(self, all_lines, filter_results, output_path, source_file, progress_callback=None):
         wb = Workbook()
 
         header_font = Font(bold=True, color="FFFFFF")
@@ -968,16 +1012,27 @@ class LogAnalyzerApp:
         ws_all['B1'].font = header_font
         ws_all['B1'].fill = all_logs_fill
 
+        # Progress: All Logs 50-70%
+        total_lines = len(all_lines)
+        batch_size = max(1000, total_lines // 100)
         for idx, line in enumerate(all_lines, start=2):
             ws_all[f'A{idx}'] = idx - 1
-            ws_all[f'B{idx}'] = line
+            ws_all[f'B{idx}'] = sanitize_for_excel(line)
+            if progress_callback and (idx - 2) % batch_size == 0:
+                pct = 50 + ((idx - 2) / total_lines) * 20
+                progress_callback(pct)
 
         ws_all.column_dimensions['A'].width = 10
         ws_all.column_dimensions['B'].width = 150
 
+        if progress_callback:
+            progress_callback(70)
+
         # --- Filter Sheets ---
         color_idx = 0
         link_font = Font(color="0563C1", underline="single")  # Blue underlined hyperlink style
+        num_filters = len(filter_results)
+        filter_idx = 0
 
         for filter_name, data in filter_results.items():
             ws = wb.create_sheet(title=filter_name[:31])  # Excel sheet names max 31 chars
@@ -1001,10 +1056,16 @@ class LogAnalyzerApp:
                 all_logs_row = line_num + 1
                 cell.hyperlink = f"#'All Logs'!A{all_logs_row}"
                 cell.font = link_font
-                ws[f'B{idx}'] = line
+                ws[f'B{idx}'] = sanitize_for_excel(line)
 
             ws.column_dimensions['A'].width = 15
             ws.column_dimensions['B'].width = 150
+
+            # Progress: Filter sheets 70-90%
+            filter_idx += 1
+            if progress_callback:
+                pct = 70 + (filter_idx / num_filters) * 20
+                progress_callback(pct)
 
         # --- Summary Sheet ---
         ws_summary = wb.create_sheet(title="Summary")
@@ -1042,9 +1103,12 @@ class LogAnalyzerApp:
         ws_summary.column_dimensions['A'].width = 25
         ws_summary.column_dimensions['B'].width = 80
 
+        if progress_callback:
+            progress_callback(95)
+
         wb.save(output_path)
 
-    def create_excel_report_concat(self, sorted_tagged_lines, filter_results, output_path, source_files):
+    def create_excel_report_concat(self, sorted_tagged_lines, filter_results, output_path, source_files, progress_callback=None):
         """
         Create Excel report for concatenated multi-file analysis.
         Optimized for large files with bulk operations.
@@ -1097,7 +1161,7 @@ class LogAnalyzerApp:
                 current_date = line_date
 
             # Build row data
-            rows_to_add.append([idx, str(line_date) if line_date else "N/A", filename, line])
+            rows_to_add.append([idx, str(line_date) if line_date else "N/A", filename, sanitize_for_excel(line)])
 
             # Track color position (only for Date column B)
             if line_date:
@@ -1112,9 +1176,14 @@ class LogAnalyzerApp:
             progress_counter += 1
             if progress_counter % progress_interval == 0:
                 self.update_status(f"Processing All Logs: {progress_counter:,}/{len(sorted_tagged_lines):,} lines...", "blue")
+                if progress_callback:
+                    pct = 50 + (progress_counter / len(sorted_tagged_lines)) * 15
+                    progress_callback(pct)
 
         # Bulk append all rows (much faster)
         self.update_status("Writing All Logs rows to Excel...", "blue")
+        if progress_callback:
+            progress_callback(65)
         for row_data in rows_to_add:
             ws_all.append(row_data)
 
@@ -1141,9 +1210,14 @@ class LogAnalyzerApp:
         ws_all.column_dimensions['C'].width = 30
         ws_all.column_dimensions['D'].width = 120
 
+        if progress_callback:
+            progress_callback(70)
+
         # --- Filter Sheets (Optimized) ---
         color_idx = 0
         link_font = Font(color="0563C1", underline="single")  # Blue underlined hyperlink style
+        num_filters = len(filter_results)
+        filter_idx = 0
 
         for filter_name, data in filter_results.items():
             self.update_status(f"Writing filter sheet: {filter_name}...", "blue")
@@ -1180,7 +1254,7 @@ class LogAnalyzerApp:
                     current_date = line_date
 
                 # Build row data
-                rows_to_add.append([idx, str(line_date) if line_date else "N/A", filename, line])
+                rows_to_add.append([idx, str(line_date) if line_date else "N/A", filename, sanitize_for_excel(line)])
 
                 # Track hyperlink info - map filter sheet row to All Logs row
                 all_logs_row = all_logs_row_map.get(id(tagged_line))
@@ -1224,8 +1298,16 @@ class LogAnalyzerApp:
             ws.column_dimensions['C'].width = 30
             ws.column_dimensions['D'].width = 120
 
+            # Progress: Filter sheets 70-90%
+            filter_idx += 1
+            if progress_callback:
+                pct = 70 + (filter_idx / num_filters) * 20
+                progress_callback(pct)
+
         # --- Summary Sheet ---
         self.update_status("Creating summary sheet...", "blue")
+        if progress_callback:
+            progress_callback(90)
         ws_summary = wb.create_sheet(title="Summary")
         summary_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
 
@@ -1285,6 +1367,9 @@ class LogAnalyzerApp:
 
         ws_summary.column_dimensions['A'].width = 25
         ws_summary.column_dimensions['B'].width = 80
+
+        if progress_callback:
+            progress_callback(95)
 
         self.update_status("Saving Excel file...", "blue")
         wb.save(output_path)
@@ -1415,7 +1500,7 @@ class LogAnalyzerApp:
 
         return created_files
 
-    def create_excel_report_split(self, all_lines, filter_results, output_path, source_file):
+    def create_excel_report_split(self, all_lines, filter_results, output_path, source_file, progress_callback=None):
         """
         Create Excel report with All Logs split across multiple sheets.
         Used when total lines exceed Excel's row limit.
@@ -1451,20 +1536,31 @@ class LogAnalyzerApp:
             ws['B1'].font = header_font
             ws['B1'].fill = all_logs_fill
 
-            # Add data rows
+            # Add data rows with progress tracking
+            batch_size = max(1000, (end_idx - start_idx) // 100)
             for row_offset, line_idx in enumerate(range(start_idx, end_idx)):
                 excel_row = row_offset + 2  # +2 for 1-indexed and header
                 ws[f'A{excel_row}'] = line_idx + 1  # Original line number (1-indexed)
-                ws[f'B{excel_row}'] = all_lines[line_idx]
+                ws[f'B{excel_row}'] = sanitize_for_excel(all_lines[line_idx])
+                if progress_callback and row_offset % batch_size == 0:
+                    # All Logs sheets: 50-70%
+                    overall_progress = (sheet_num * max_data_rows + row_offset) / total_lines
+                    pct = 50 + overall_progress * 20
+                    progress_callback(pct)
 
             ws.column_dimensions['A'].width = 10
             ws.column_dimensions['B'].width = 150
 
             self.update_status(f"Wrote All Logs sheet {sheet_num + 1}/{num_sheets}...", "blue")
 
+        if progress_callback:
+            progress_callback(70)
+
         # --- Filter Sheets ---
         color_idx = 0
         link_font = Font(color="0563C1", underline="single")  # Blue underlined hyperlink style
+        num_filters = len(filter_results)
+        filter_idx = 0
 
         # Helper function to get sheet name and row for a line number
         def get_all_logs_location(line_num):
@@ -1514,7 +1610,7 @@ class LogAnalyzerApp:
                         target_sheet, target_row = get_all_logs_location(line_num)
                         cell.hyperlink = f"#'{target_sheet}'!A{target_row}"
                         cell.font = link_font
-                        ws[f'B{excel_row}'] = line
+                        ws[f'B{excel_row}'] = sanitize_for_excel(line)
 
                     ws.column_dimensions['A'].width = 15
                     ws.column_dimensions['B'].width = 150
@@ -1539,14 +1635,21 @@ class LogAnalyzerApp:
                     target_sheet, target_row = get_all_logs_location(line_num)
                     cell.hyperlink = f"#'{target_sheet}'!A{target_row}"
                     cell.font = link_font
-                    ws[f'B{idx}'] = line
+                    ws[f'B{idx}'] = sanitize_for_excel(line)
 
                 ws.column_dimensions['A'].width = 15
                 ws.column_dimensions['B'].width = 150
 
             color_idx += 1
+            # Progress: Filter sheets 70-90%
+            filter_idx += 1
+            if progress_callback:
+                pct = 70 + (filter_idx / num_filters) * 20
+                progress_callback(pct)
 
         # --- Summary Sheet ---
+        if progress_callback:
+            progress_callback(90)
         ws_summary = wb.create_sheet(title="Summary")
         summary_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
 
@@ -1584,10 +1687,13 @@ class LogAnalyzerApp:
         ws_summary.column_dimensions['A'].width = 25
         ws_summary.column_dimensions['B'].width = 80
 
+        if progress_callback:
+            progress_callback(95)
+
         self.update_status("Saving Excel file...", "blue")
         wb.save(output_path)
 
-    def create_excel_report_concat_split(self, sorted_tagged_lines, filter_results, output_path, source_files):
+    def create_excel_report_concat_split(self, sorted_tagged_lines, filter_results, output_path, source_files, progress_callback=None):
         """
         Create Excel report for concatenated multi-file analysis with splitting.
         Used when total lines exceed Excel's row limit.
@@ -1630,6 +1736,7 @@ class LogAnalyzerApp:
                 ws[col].fill = all_logs_fill
 
             # Add data rows and track locations
+            batch_size = max(1000, (end_idx - start_idx) // 100)
             for row_offset, line_idx in enumerate(range(start_idx, end_idx)):
                 excel_row = row_offset + 2
                 tagged_line = sorted_tagged_lines[line_idx]
@@ -1639,10 +1746,16 @@ class LogAnalyzerApp:
                 ws[f'A{excel_row}'] = line_idx + 1
                 ws[f'B{excel_row}'] = line_date
                 ws[f'C{excel_row}'] = filename
-                ws[f'D{excel_row}'] = line
+                ws[f'D{excel_row}'] = sanitize_for_excel(line)
 
                 # Track location for hyperlinks
                 all_logs_location_map[id(tagged_line)] = (sheet_name, excel_row)
+
+                if progress_callback and row_offset % batch_size == 0:
+                    # All Logs sheets: 50-70%
+                    overall_progress = (sheet_num * max_data_rows + row_offset) / total_lines
+                    pct = 50 + overall_progress * 20
+                    progress_callback(pct)
 
             ws.column_dimensions['A'].width = 10
             ws.column_dimensions['B'].width = 12
@@ -1651,9 +1764,14 @@ class LogAnalyzerApp:
 
             self.update_status(f"Wrote All Logs sheet {sheet_num + 1}/{num_sheets}...", "blue")
 
+        if progress_callback:
+            progress_callback(70)
+
         # --- Filter Sheets ---
         color_idx = 0
         link_font = Font(color="0563C1", underline="single")  # Blue underlined hyperlink style
+        num_filters = len(filter_results)
+        filter_idx = 0
 
         for filter_name, data in filter_results.items():
             matches = data['matches']
@@ -1700,7 +1818,7 @@ class LogAnalyzerApp:
                             cell.font = link_font
                         ws[f'B{excel_row}'] = line_date
                         ws[f'C{excel_row}'] = filename
-                        ws[f'D{excel_row}'] = line
+                        ws[f'D{excel_row}'] = sanitize_for_excel(line)
 
                     ws.column_dimensions['A'].width = 10
                     ws.column_dimensions['B'].width = 12
@@ -1732,7 +1850,7 @@ class LogAnalyzerApp:
                         cell.font = link_font
                     ws[f'B{excel_row}'] = line_date
                     ws[f'C{excel_row}'] = filename
-                    ws[f'D{excel_row}'] = line
+                    ws[f'D{excel_row}'] = sanitize_for_excel(line)
 
                 ws.column_dimensions['A'].width = 10
                 ws.column_dimensions['B'].width = 12
@@ -1740,8 +1858,15 @@ class LogAnalyzerApp:
                 ws.column_dimensions['D'].width = 120
 
             color_idx += 1
+            # Progress: Filter sheets 70-90%
+            filter_idx += 1
+            if progress_callback:
+                pct = 70 + (filter_idx / num_filters) * 20
+                progress_callback(pct)
 
         # --- Summary Sheet ---
+        if progress_callback:
+            progress_callback(90)
         ws_summary = wb.create_sheet(title="Summary")
         summary_fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
 
@@ -1802,6 +1927,9 @@ class LogAnalyzerApp:
 
         ws_summary.column_dimensions['A'].width = 25
         ws_summary.column_dimensions['B'].width = 80
+
+        if progress_callback:
+            progress_callback(95)
 
         self.update_status("Saving Excel file...", "blue")
         wb.save(output_path)
