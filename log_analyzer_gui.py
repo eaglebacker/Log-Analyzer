@@ -353,8 +353,9 @@ class LogAnalyzerApp:
         filter_btn_frame = ttk.Frame(filter_list_frame)
         filter_btn_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
 
-        ttk.Button(filter_btn_frame, text="+ Add Tab", command=self.add_filter, width=12).grid(row=0, column=0, padx=(0, 5))
-        ttk.Button(filter_btn_frame, text="- Remove", command=self.remove_filter, width=12).grid(row=0, column=1)
+        ttk.Button(filter_btn_frame, text="+ Add", command=self.add_filter, width=8).grid(row=0, column=0, padx=(0, 3))
+        ttk.Button(filter_btn_frame, text="Edit", command=self.edit_filter, width=8).grid(row=0, column=1, padx=(0, 3))
+        ttk.Button(filter_btn_frame, text="- Remove", command=self.remove_filter, width=8).grid(row=0, column=2)
 
         # --- Middle: Active Filters (NEW) ---
         active_frame = ttk.Frame(filters_frame)
@@ -603,6 +604,47 @@ class LogAnalyzerApp:
             self.keywords_listbox.delete(0, tk.END)
             self.selected_filter = None
             self.keywords_label.configure(text="Keywords for selected tab:")
+            self.save_config()
+
+    def edit_filter(self):
+        """Edit/rename the selected filter tab."""
+        selection = self.filter_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select a filter tab to edit.")
+            return
+
+        old_name = self.filter_listbox.get(selection[0])
+        # Get list of other filter names (excluding current one for validation)
+        other_names = [name for name in self.filters.keys() if name != old_name]
+
+        dialog = FilterNameDialog(self.root, "Edit Filter Tab", existing_names=other_names, initial_value=old_name)
+        if dialog.result and dialog.result != old_name:
+            new_name = dialog.result
+
+            # Update filters dict (preserve order by rebuilding)
+            new_filters = {}
+            for name, keywords in self.filters.items():
+                if name == old_name:
+                    new_filters[new_name] = keywords
+                else:
+                    new_filters[name] = keywords
+            self.filters = new_filters
+
+            # Update active_filters list if the filter was active
+            if old_name in self.active_filters:
+                idx = self.active_filters.index(old_name)
+                self.active_filters[idx] = new_name
+                self.populate_active_list()
+
+            # Update the filter listbox
+            self.filter_listbox.delete(selection[0])
+            self.filter_listbox.insert(selection[0], new_name)
+            self.filter_listbox.selection_set(selection[0])
+
+            # Update selected_filter and keywords label
+            self.selected_filter = new_name
+            self.keywords_label.configure(text=f"Keywords for '{new_name}':")
+
             self.save_config()
 
     def on_filter_select(self, event):
@@ -2064,7 +2106,7 @@ class LogAnalyzerApp:
 class FilterNameDialog:
     """Simple dialog to get a filter name."""
 
-    def __init__(self, parent, title, existing_names=None):
+    def __init__(self, parent, title, existing_names=None, initial_value=None):
         self.result = None
         self.existing_names = existing_names or []
 
@@ -2085,6 +2127,10 @@ class FilterNameDialog:
 
         self.entry = ttk.Entry(frame, width=40)
         self.entry.pack(fill="x", pady=(5, 15))
+        # Pre-fill with initial value if provided (for editing)
+        if initial_value:
+            self.entry.insert(0, initial_value)
+            self.entry.select_range(0, tk.END)
         self.entry.focus_set()
         self.entry.bind("<Return>", lambda e: self.ok())
 
