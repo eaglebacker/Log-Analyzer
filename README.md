@@ -24,6 +24,17 @@ Download the latest version from the [Releases](../../releases) page.
 2. Download `LogAnalyzer.exe` from the latest release
 3. Run the application - no installation required!
 
+### Windows SmartScreen Warning
+
+On first run, Windows may display a warning: *"Windows protected your PC"*
+
+This is normal for apps not signed with a paid certificate. To run the app:
+
+1. Click **"More info"**
+2. Click **"Run anyway"**
+
+The warning only appears once. The app is open-source and safe to use - you can review the code in this repository.
+
 ## Usage
 
 1. **Select a log file**: Click "Browse" or drag & drop a file onto the input area
