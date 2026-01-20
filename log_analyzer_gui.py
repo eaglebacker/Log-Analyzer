@@ -349,13 +349,15 @@ class LogAnalyzerApp:
         filter_scroll.grid(row=0, column=1, sticky="ns")
         self.filter_listbox.configure(yscrollcommand=filter_scroll.set)
 
-        # Filter buttons
+        # Filter buttons (two rows for better fit)
         filter_btn_frame = ttk.Frame(filter_list_frame)
         filter_btn_frame.grid(row=2, column=0, sticky="ew", pady=(5, 0))
+        filter_btn_frame.columnconfigure(0, weight=1)
+        filter_btn_frame.columnconfigure(1, weight=1)
 
-        ttk.Button(filter_btn_frame, text="+ Add", command=self.add_filter, width=8).grid(row=0, column=0, padx=(0, 3))
-        ttk.Button(filter_btn_frame, text="Edit", command=self.edit_filter, width=8).grid(row=0, column=1, padx=(0, 3))
-        ttk.Button(filter_btn_frame, text="- Remove", command=self.remove_filter, width=8).grid(row=0, column=2)
+        ttk.Button(filter_btn_frame, text="+ Add", command=self.add_filter).grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        ttk.Button(filter_btn_frame, text="Edit", command=self.edit_filter).grid(row=0, column=1, sticky="ew")
+        ttk.Button(filter_btn_frame, text="- Remove", command=self.remove_filter).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(3, 0))
 
         # --- Middle: Active Filters (NEW) ---
         active_frame = ttk.Frame(filters_frame)
@@ -2112,7 +2114,7 @@ class FilterNameDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(title)
-        self.dialog.geometry("350x120")
+        self.dialog.geometry("350x140")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()
