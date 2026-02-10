@@ -49,16 +49,6 @@ Enable "Concatenate Mode" to analyze multiple log files together:
 - Files are merged and sorted chronologically by timestamp
 - Date separators help identify when logs are from different days
 
-## Default Filters
-
-The application comes with these default filter categories:
-- **Errors**: Error, Exception, Fatal, Critical, Fail, Failed
-- **Client Command**: Client Command
-- **AET warning**: AET warning
-- **Bigfoot General**: Various Bigfoot-specific log entries
-
-You can customize these or add your own filters.
-
 ## Building from Source
 
 ### Requirements
