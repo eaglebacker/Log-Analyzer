@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m PyInstaller:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRemove default filter sets, start with empty filters\n\nThe hardcoded Errors, Client Command, AET warning, and Bigfoot General\nfilter sets have been removed. New installations start with no filters.\nRenamed \"Reset All to Defaults\" button to \"Clear All Filters\".\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)"
+    ]
+  }
+}

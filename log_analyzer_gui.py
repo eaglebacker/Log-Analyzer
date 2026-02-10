@@ -71,27 +71,7 @@ class LogAnalyzerApp:
         self.active_filters = []  # List of filter names to use in analysis
 
         # Default filters
-        self.default_filters = {
-            "Errors": ["Error", "Exception", "Fatal", "Critical", "Fail", "Failed"],
-            "Client Command": ["Client Command"],
-            "AET warning": ["AET warning"],
-            "Bigfoot General": [
-                "Current Software Version",
-                "CNozzleTipDefinitionModel Pressure",
-                "Set Drop Drive Frequency from drop delay records",
-                "Setting Defanning",
-                "Set Sample Offset",
-                "Set Boost Time",
-                "Set Boost Overpressure",
-                "Set Area Scalar",
-                "Set Droplet Camera Position",
-                "Set Sort Straight Deflection",
-                "Set Wash Time",
-                "Set Wash Pressure",
-                "Set Wash Backflush Time",
-                "Setting Drop Delay:"
-            ]
-        }
+        self.default_filters = {}
 
         # Tab colors for Excel (cycling through these)
         self.tab_colors = [
@@ -424,7 +404,7 @@ class LogAnalyzerApp:
         self.keywords_listbox.configure(yscrollcommand=kw_scroll.set)
 
         # Reset button
-        ttk.Button(keywords_frame, text="Reset All to Defaults", command=self.load_default_filters).grid(
+        ttk.Button(keywords_frame, text="Clear All Filters", command=self.load_default_filters).grid(
             row=3, column=0, sticky="w", pady=(10, 0)
         )
 
